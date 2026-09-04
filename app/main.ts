@@ -105,22 +105,37 @@ function parsePattern(pattern: string): Token[] {
       i++;
     }
     if (pattern[i] === "{") {
-      // {n} or {n,} quantifier.
+      // {n}, {n,}, or {n,m} quantifier.
       const closeBrace = pattern.indexOf("}", i + 1);
       if (closeBrace !== -1) {
         const inner = pattern.slice(i + 1, closeBrace);
-        if (inner.includes(",")) {
-          // {n,} — at least n times.
-          const nStr = inner.split(",")[0];
-          const n = parseInt(nStr, 10);
+        const parts = inner.split(",");
+        if (parts.length === 2) {
+          // {n,} or {n,m}.
+          const n = parseInt(parts[0], 10);
           if (!isNaN(n) && n >= 0) {
-            // n mandatory copies + 1 star copy (zero-or-more).
-            for (let c = 0; c < n; c++) {
-              tokens.push({ ...tok });
+            if (parts[1].trim() === "") {
+              // {n,} — at least n times: n mandatory + 1 star copy.
+              for (let c = 0; c < n; c++) {
+                tokens.push({ ...tok });
+              }
+              tokens.push({ ...tok, star: true });
+              i = closeBrace + 1;
+              continue; // skip the default push below
+            } else {
+              // {n,m} — between n and m times: n mandatory + (m-n) optional.
+              const m = parseInt(parts[1], 10);
+              if (!isNaN(m) && m >= n) {
+                for (let c = 0; c < n; c++) {
+                  tokens.push({ ...tok });
+                }
+                for (let c = n; c < m; c++) {
+                  tokens.push({ ...tok, opt: true });
+                }
+                i = closeBrace + 1;
+                continue; // skip the default push below
+              }
             }
-            tokens.push({ ...tok, star: true });
-            i = closeBrace + 1;
-            continue; // skip the default push below
           }
         } else {
           // {n} — exactly n times.
