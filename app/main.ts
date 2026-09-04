@@ -88,6 +88,21 @@ function parsePattern(pattern: string): Token[] {
       tok = { type: "literal", char: pattern[i] };
       i++;
     }
+    if (pattern[i] === "{") {
+      // {n} quantifier: expand into n copies of the preceding token.
+      const closeBrace = pattern.indexOf("}", i + 1);
+      if (closeBrace !== -1) {
+        const count = parseInt(pattern.slice(i + 1, closeBrace), 10);
+        if (!isNaN(count) && count >= 0) {
+          for (let c = 0; c < count; c++) {
+            tokens.push({ ...tok });
+          }
+          i = closeBrace + 1;
+          continue; // skip the default push below
+        }
+      }
+      // Not a valid {n} — treat '{' as part of the token (fall through).
+    }
     if (pattern[i] === "+") {
       tok.plus = true;
       i++;
