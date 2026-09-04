@@ -314,20 +314,45 @@ function findNextMatch(spec: RawSpec, text: string, from: number): { start: numb
   return null;
 }
 
-/** Collect all non-overlapping matches in a single line. */
-function extractAll(rawPattern: string, text: string): string[] {
+/** Collect all non-overlapping match intervals ([start, end)). */
+function collectIntervals(rawPattern: string, text: string): Array<[number, number]> {
   const spec = preparePattern(rawPattern);
-  const results: string[] = [];
+  const results: Array<[number, number]> = [];
   let pos = 0;
   while (pos <= text.length) {
     const m = findNextMatch(spec, text, pos);
     if (m === null) break;
-    results.push(m.text);
+    results.push([m.start, m.start + m.text.length]);
     // Advance past this match (non-zero width guaranteed since l>=1).
     pos = m.start + m.text.length;
   }
   return results;
 }
+
+/** Collect all non-overlapping matched substrings. */
+function extractAll(rawPattern: string, text: string): string[] {
+  return collectIntervals(rawPattern, text).map(([s, e]) => text.slice(s, e));
+}
+
+/** Wrap every matched interval in the bold-red ANSI highlight. */
+function highlightLine(rawPattern: string, text: string): string {
+  const OPEN = "\u001b[01;31m";
+  const CLOSE = "\u001b[m";
+  const ivs = collectIntervals(rawPattern, text);
+  if (ivs.length === 0) return text;
+  let out = "";
+  let cursor = 0;
+  for (const [s, e] of ivs) {
+    out += text.slice(cursor, s);
+    out += OPEN + text.slice(s, e) + CLOSE;
+    cursor = e;
+  }
+  out += text.slice(cursor);
+  return out;
+}
+
+// Color mode: --color=<val>. Only "always" activates highlighting here.
+const colorAlways = args.some((a) => a === "--color=always");
 
 const linesArr = inputLine.split("\n");
 
@@ -337,6 +362,11 @@ for (const line of linesArr) {
     const matches = extractAll(patternStr, line);
     for (const mtxt of matches) {
       console.log(mtxt);
+      anyMatch = true;
+    }
+  } else if (colorAlways) {
+    if (matchPattern(line, patternStr)) {
+      console.log(highlightLine(patternStr, line));
       anyMatch = true;
     }
   } else {
