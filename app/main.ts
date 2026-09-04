@@ -274,15 +274,26 @@ function fullMatchFlattened(flattened: string, input: string): boolean {
   return matchRecur(tokens, 0, input, 0, true);
 }
 
-/** Compute the leftmost, shortest matched substring, or null if none. */
+/** Compute the leftmost, longest matched substring honoring anchors, or null. */
 function extractOnce(rawPattern: string, text: string): string | null {
+  const anchoredStart = rawPattern.startsWith("^");
+  const anchoredEnd = rawPattern.endsWith("$");
   const candidates = expandGroups(stripAnchors(rawPattern));
+
+  const startMin = anchoredStart ? Math.min(0, text.length) : 0;
+  const startMax = anchoredStart ? Math.min(0, text.length) : text.length;
+
   for (const cand of candidates) {
-    for (let s = 0; s <= text.length; s++) {
-      for (let l = 1; s + l <= text.length; l++) {
+    for (let s = startMin; s <= startMax; s++) {
+      let best: string | null = null;
+      // Length bounds: with $-anchor the match must reach the end of text.
+      const lo = anchoredEnd ? text.length - s : 1;
+      const hi = text.length - s;
+      for (let l = lo; l <= hi; l++) {
         const sub = text.slice(s, s + l);
-        if (fullMatchFlattened(cand, sub)) return sub;
+        if (fullMatchFlattened(cand, sub)) best = sub;
       }
+      if (best !== null) return best;
     }
   }
   return null;
