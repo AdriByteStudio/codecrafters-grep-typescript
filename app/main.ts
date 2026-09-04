@@ -7,6 +7,7 @@ type Token =
   | { type: "literal"; char: string; plus?: boolean; opt?: boolean }
   | { type: "digit"; plus?: boolean; opt?: boolean }
   | { type: "word"; plus?: boolean; opt?: boolean }
+  | { type: "anyChar"; plus?: boolean; opt?: boolean }
   | { type: "charGroup"; chars: string; negate: boolean; plus?: boolean; opt?: boolean };
 
 function parsePattern(pattern: string): Token[] {
@@ -36,6 +37,9 @@ function parsePattern(pattern: string): Token[] {
       const chars = pattern.slice(i + 1, close);
       tok = { type: "charGroup", chars, negate: false };
       i = close + 1;
+    } else if (pattern[i] === ".") {
+      tok = { type: "anyChar" };
+      i++;
     } else {
       tok = { type: "literal", char: pattern[i] };
       i++;
@@ -57,6 +61,8 @@ function matchesToken(token: Token, ch: string): boolean {
     return ch === token.char;
   } else if (token.type === "digit") {
     return ch >= "0" && ch <= "9";
+  } else if (token.type === "anyChar") {
+    return ch !== "\n";
   } else if (token.type === "word") {
     return (
       (ch >= "a" && ch <= "z") ||
