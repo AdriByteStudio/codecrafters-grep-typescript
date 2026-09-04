@@ -11,6 +11,8 @@ if (eIndex === -1) {
 }
 const patternStr = args[eIndex + 1];
 
+const rFlag = args.includes("-r");
+
 // Collect file arguments: everything after the pattern that doesn't start with '-'.
 const fileArgs: string[] = [];
 for (let fi = eIndex + 2; fi < args.length; fi++) {
@@ -21,8 +23,23 @@ for (let fi = eIndex + 2; fi < args.length; fi++) {
 // Load input lines: from files (with optional prefix) or stdin.
 interface InputEntry { prefix: string; text: string; }
 const inputs: InputEntry[] = [];
-const multiFile = fileArgs.length > 1;
-if (fileArgs.length > 0) {
+
+if (rFlag && fileArgs.length > 0) {
+  // Recursive directory search: collect all files under each directory argument.
+  const pathMod = await import("path");
+  const fsMod = await import("fs/promises");
+  for (const dir of fileArgs) {
+    const entries = await fsMod.readdir(dir, { recursive: true, withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      const fullPath = pathMod.join(entry.parentPath ?? entry.path, entry.name);
+      const relPath = pathMod.join(dir, pathMod.relative(dir, fullPath));
+      const text = await Bun.file(fullPath).text();
+      inputs.push({ prefix: relPath + ":", text });
+    }
+  }
+} else if (fileArgs.length > 0) {
+  const multiFile = fileArgs.length > 1;
   for (const f of fileArgs) {
     inputs.push({ prefix: multiFile ? f + ":" : "", text: await Bun.file(f).text() });
   }
