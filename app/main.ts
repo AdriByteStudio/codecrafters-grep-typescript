@@ -274,29 +274,57 @@ function fullMatchFlattened(flattened: string, input: string): boolean {
   return matchRecur(tokens, 0, input, 0, true);
 }
 
-/** Compute the leftmost, longest matched substring honoring anchors, or null. */
-function extractOnce(rawPattern: string, text: string): string | null {
-  const anchoredStart = rawPattern.startsWith("^");
-  const anchoredEnd = rawPattern.endsWith("$");
-  const candidates = expandGroups(stripAnchors(rawPattern));
+interface RawSpec {
+  anchoredStart: boolean;
+  anchoredEnd: boolean;
+  candidates: string[];
+}
 
-  const startMin = anchoredStart ? Math.min(0, text.length) : 0;
-  const startMax = anchoredStart ? Math.min(0, text.length) : text.length;
+function preparePattern(rawPattern: string): RawSpec {
+  return {
+    anchoredStart: rawPattern.startsWith("^"),
+    anchoredEnd: rawPattern.endsWith("$"),
+    candidates: expandGroups(stripAnchors(rawPattern)),
+  };
+}
 
-  for (const cand of candidates) {
+/**
+ * Find the leftmost, longest match occurring AT OR AFTER `from`,
+ * honoring anchors. Returns { start, text } or null.
+ */
+function findNextMatch(spec: RawSpec, text: string, from: number): { start: number; text: string } | null {
+  const startMin = spec.anchoredStart ? Math.max(Math.min(0, text.length), from) : from;
+  const startMax = spec.anchoredStart ? Math.min(0, text.length) : text.length;
+
+  for (const cand of spec.candidates) {
     for (let s = startMin; s <= startMax; s++) {
       let best: string | null = null;
       // Length bounds: with $-anchor the match must reach the end of text.
-      const lo = anchoredEnd ? text.length - s : 1;
+      const lo = spec.anchoredEnd ? text.length - s : 1;
       const hi = text.length - s;
       for (let l = lo; l <= hi; l++) {
         const sub = text.slice(s, s + l);
         if (fullMatchFlattened(cand, sub)) best = sub;
       }
-      if (best !== null) return best;
+      if (best !== null) return { start: s, text: best };
     }
   }
   return null;
+}
+
+/** Collect all non-overlapping matches in a single line. */
+function extractAll(rawPattern: string, text: string): string[] {
+  const spec = preparePattern(rawPattern);
+  const results: string[] = [];
+  let pos = 0;
+  while (pos <= text.length) {
+    const m = findNextMatch(spec, text, pos);
+    if (m === null) break;
+    results.push(m.text);
+    // Advance past this match (non-zero width guaranteed since l>=1).
+    pos = m.start + m.text.length;
+  }
+  return results;
 }
 
 const linesArr = inputLine.split("\n");
@@ -304,9 +332,9 @@ const linesArr = inputLine.split("\n");
 let anyMatch = false;
 for (const line of linesArr) {
   if (oFlag) {
-    const matched = extractOnce(patternStr, line);
-    if (matched !== null) {
-      console.log(matched);
+    const matches = extractAll(patternStr, line);
+    for (const mtxt of matches) {
+      console.log(mtxt);
       anyMatch = true;
     }
   } else {
