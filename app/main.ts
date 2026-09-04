@@ -228,13 +228,19 @@ function matchRecur(
   if (token.type === "group") {
     // Find all end positions where the group matches input[startPos..end].
     // The alternative must match from startPos and consume exactly end - startPos characters.
-    const findEnds = (startPos: number): Array<{ end: number; text: string }> => {
-      const results: Array<{ end: number; text: string }> = [];
+    // Each result carries a snapshot of the captures at match time, so probing
+    // never corrupts the caller's captures (important for later backreferences).
+    const findEnds = (
+      startPos: number,
+      startCaps: (string | undefined)[]
+    ): Array<{ end: number; text: string; caps: (string | undefined)[] }> => {
+      const results: Array<{ end: number; text: string; caps: (string | undefined)[] }> = [];
       for (let end = startPos + 1; end <= input.length; end++) {
         for (const alt of token.alternatives) {
           const sub = input.slice(startPos, end);
-          if (matchRecur(alt, 0, sub, 0, true, captures)) {
-            results.push({ end, text: sub });
+          const probeCaps = startCaps.slice();
+          if (matchRecur(alt, 0, sub, 0, true, probeCaps)) {
+            results.push({ end, text: sub, caps: probeCaps });
             break;
           }
         }
@@ -244,14 +250,16 @@ function matchRecur(
 
     // Collect positions reachable by 0, 1, 2, ... group matches.
     // positions[0] = [{end: pi}], positions[k] = end positions after k group matches.
-    const allPositions: Array<Array<{ end: number; text: string }>> = [[{ end: pi, text: "" }]];
+    const allPositions: Array<Array<{ end: number; text: string; caps: (string | undefined)[] }>> = [
+      [{ end: pi, text: "", caps: captures.slice() }],
+    ];
 
     for (let count = 1; count <= input.length; count++) {
       const prev = allPositions[count - 1];
-      const next: Array<{ end: number; text: string }> = [];
+      const next: Array<{ end: number; text: string; caps: (string | undefined)[] }> = [];
       for (const p of prev) {
-        for (const r of findEnds(p.end)) {
-          next.push({ end: r.end, text: r.text });
+        for (const r of findEnds(p.end, p.caps)) {
+          next.push({ end: r.end, text: r.text, caps: r.caps });
         }
       }
       if (next.length === 0) break;
@@ -263,6 +271,10 @@ function matchRecur(
       const positions = allPositions[count];
       positions.sort((a, b) => b.end - a.end); // greedy: longest first
       for (const pos of positions) {
+        // Restore the captures to the state when this group matched, then set
+        // this group's own capture.
+        captures.length = 0;
+        captures.push(...pos.caps);
         captures[token.groupNum] = pos.text;
         if (matchRecur(tokens, ti + 1, input, pos.end, mustFinish, captures)) return true;
       }
