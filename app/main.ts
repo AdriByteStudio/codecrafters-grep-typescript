@@ -52,7 +52,8 @@ type Token =
   | { type: "digit"; plus?: boolean; opt?: boolean; star?: boolean }
   | { type: "word"; plus?: boolean; opt?: boolean; star?: boolean }
   | { type: "anyChar"; plus?: boolean; opt?: boolean; star?: boolean }
-  | { type: "charGroup"; chars: string; negate: boolean; plus?: boolean; opt?: boolean; star?: boolean };
+  | { type: "charGroup"; chars: string; negate: boolean; plus?: boolean; opt?: boolean; star?: boolean }
+  | { type: "group"; alternatives: Token[][]; plus?: boolean; opt?: boolean; star?: boolean };
 
 function parsePattern(pattern: string): Token[] {
   const tokens: Token[] = [];
@@ -81,6 +82,21 @@ function parsePattern(pattern: string): Token[] {
       const chars = pattern.slice(i + 1, close);
       tok = { type: "charGroup", chars, negate: false };
       i = close + 1;
+    } else if (pattern[i] === "(") {
+      // Find matching closing paren.
+      let depth = 1;
+      let j = i + 1;
+      while (j < pattern.length && depth > 0) {
+        if (pattern[j] === "\\") { j += 2; continue; }
+        if (pattern[j] === "(") depth++;
+        else if (pattern[j] === ")") depth--;
+        if (depth > 0) j++;
+      }
+      const inner = pattern.substring(i + 1, j);
+      i = j + 1;
+      const alts = splitTopLevelPipe(inner);
+      const alternatives = alts.map((alt) => parsePattern(alt));
+      tok = { type: "group", alternatives };
     } else if (pattern[i] === ".") {
       tok = { type: "anyChar" };
       i++;
@@ -177,6 +193,78 @@ function matchRecur(
 
   const token = tokens[ti];
 
+  if (token.type === "group") {
+    // Find all end positions where the group matches input[startPos..end].
+    // The alternative must match from startPos and consume exactly end - startPos characters.
+    const findEnds = (startPos: number): number[] => {
+      const ends: number[] = [];
+      for (let end = startPos + 1; end <= input.length; end++) {
+        for (const alt of token.alternatives) {
+          const sub = input.slice(startPos, end);
+          if (matchRecur(alt, 0, sub, 0, true)) { ends.push(end); break; }
+        }
+      }
+      return ends;
+    };
+
+    // Collect positions reachable by 0, 1, 2, ... group matches.
+    // positions[0] = [pi], positions[k] = end positions after k group matches.
+    const allPositions: number[][] = [[pi]];
+
+    for (let count = 1; count <= input.length; count++) {
+      const prev = allPositions[count - 1];
+      const next: number[] = [];
+      for (const p of prev) {
+        for (const ep of findEnds(p)) {
+          next.push(ep);
+        }
+      }
+      if (next.length === 0) break;
+      allPositions.push([...new Set(next)]);
+    }
+
+    if (token.plus) {
+      // One or more: try from max matches downward (greedy).
+      for (let count = allPositions.length - 1; count >= 1; count--) {
+        const posSorted = allPositions[count].sort((a, b) => b - a);
+        for (const p of posSorted) {
+          if (matchRecur(tokens, ti + 1, input, p, mustFinish)) return true;
+        }
+      }
+      return false;
+    }
+
+    if (token.star) {
+      // Zero or more: try from max matches downward (greedy).
+      for (let count = allPositions.length - 1; count >= 0; count--) {
+        const posSorted = allPositions[count].sort((a, b) => b - a);
+        for (const p of posSorted) {
+          if (matchRecur(tokens, ti + 1, input, p, mustFinish)) return true;
+        }
+      }
+      return false;
+    }
+
+    if (token.opt) {
+      // Zero or one: try one match first, then zero.
+      if (allPositions.length > 1) {
+        for (const end of allPositions[1]) {
+          if (matchRecur(tokens, ti + 1, input, end, mustFinish)) return true;
+        }
+      }
+      return matchRecur(tokens, ti + 1, input, pi, mustFinish);
+    }
+
+    // No quantifier: exactly one match.
+    if (allPositions.length > 1) {
+      const posSorted = allPositions[1].sort((a, b) => b - a);
+      for (const end of posSorted) {
+        if (matchRecur(tokens, ti + 1, input, end, mustFinish)) return true;
+      }
+    }
+    return false;
+  }
+
   if (token.plus) {
     // Consume one-or-more occurrences greedily, then backtrack shorter lengths.
     let k = pi;
@@ -212,57 +300,12 @@ function matchRecur(
 }
 
 /**
- * Expand a pattern containing parenthesised alternation groups like
- * `(cat|dog)` into an array of flat pattern strings (Cartesian product),
- * leaving ordinary metacharacters (\d, \w, [], ., *, ?, +, ^, $) untouched.
+ * Expand a pattern containing parenthesised alternation groups.
+ * Now that parsePattern handles groups directly, this simply returns
+ * the pattern as-is (groups are tokenized by parsePattern).
  */
 function expandGroups(pattern: string): string[] {
-  let idx = 0;
-  let curPrefix = "";
-
-  while (idx < pattern.length) {
-    const ch = pattern[idx];
-    if (ch === "\\") {
-      curPrefix += pattern.substr(idx, 2);
-      idx += 2;
-      continue;
-    }
-    if (ch === "(") {
-      // Find matching closing paren accounting for escapes.
-      let depth = 1;
-      let j = idx + 1;
-      while (j < pattern.length && depth > 0) {
-        if (pattern[j] === "\\") {
-          j += 2;
-          continue;
-        }
-        if (pattern[j] === "(") depth++;
-        else if (pattern[j] === ")") depth--;
-        if (depth > 0) j++;
-      }
-      const inner = pattern.substring(idx + 1, j);
-      const closedIdx = j;
-      // Alternatives inside this group (split on top-level | ).
-      const alts = splitTopLevelPipe(inner);
-      // Suffix after the group gets processed recursively.
-      const suffixes = expandGroups(pattern.substring(closedIdx + 1));
-      const products: string[] = [];
-      for (const alt of alts) {
-        const expAlt = expandSingleSegment(alt);
-        for (const ea of expAlt) {
-          for (const suf of suffixes) {
-            products.push(curPrefix + ea + suf);
-          }
-        }
-      }
-      return products;
-    }
-    curPrefix += ch;
-    idx++;
-  }
-
-  // No groups found: emit the segment as-is.
-  return [curPrefix];
+  return [pattern];
 }
 
 /** Split a group-body string on top-level `|` (respecting nests/escapes). */
@@ -333,6 +376,7 @@ function matchFlat(pattern: string): (inputLine: string) => boolean {
       }
       return false;
     }
+    // Unanchored: try each start position for a match.
     for (let i = 0; i <= inputLine.length; i++) {
       if (matchRecur(tokens, 0, inputLine, i, false)) return true;
     }
