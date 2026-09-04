@@ -9,6 +9,18 @@ function matchPattern(inputLine: string, pattern: string): boolean {
       if (ch >= "0" && ch <= "9") return true;
     }
     return false;
+  } else if (pattern === "\\w") {
+    for (const ch of inputLine) {
+      if (
+        (ch >= "a" && ch <= "z") ||
+        (ch >= "A" && ch <= "Z") ||
+        (ch >= "0" && ch <= "9") ||
+        ch === "_"
+      ) {
+        return true;
+      }
+    }
+    return false;
   } else if (pattern.length === 1) {
     return inputLine.includes(pattern);
   } else {
