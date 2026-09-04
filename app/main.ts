@@ -256,9 +256,19 @@ if (args[2] !== "-E") {
   process.exit(1);
 }
 
-if (matchPattern(inputLine, pattern)) {
-  console.log(inputLine.replace(/\n$/, ""));
-  process.exit(0);
-} else {
+if (args[2] !== "-E") {
+  console.log("Expected first argument to be '-E'");
   process.exit(1);
 }
+
+const lines = inputLine.split("\n");
+
+let anyMatch = false;
+for (const line of lines) {
+  if (matchPattern(line, pattern)) {
+    console.log(line);
+    anyMatch = true;
+  }
+}
+
+process.exit(anyMatch ? 0 : 1);
