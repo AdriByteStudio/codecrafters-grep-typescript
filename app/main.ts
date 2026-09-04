@@ -4,70 +4,104 @@ const pattern = args[3];
 const inputLine: string = await Bun.stdin.text();
 
 type Token =
-  | { type: "literal"; char: string }
-  | { type: "digit" }
-  | { type: "word" }
-  | { type: "charGroup"; chars: string; negate: boolean };
+  | { type: "literal"; char: string; plus?: boolean }
+  | { type: "digit"; plus?: boolean }
+  | { type: "word"; plus?: boolean }
+  | { type: "charGroup"; chars: string; negate: boolean; plus?: boolean };
 
 function parsePattern(pattern: string): Token[] {
   const tokens: Token[] = [];
   let i = 0;
   while (i < pattern.length) {
+    let tok: Token;
     if (pattern[i] === "\\") {
       const next = pattern[i + 1];
       if (next === "d") {
-        tokens.push({ type: "digit" });
+        tok = { type: "digit" };
         i += 2;
       } else if (next === "w") {
-        tokens.push({ type: "word" });
+        tok = { type: "word" };
         i += 2;
       } else {
-        tokens.push({ type: "literal", char: next });
+        tok = { type: "literal", char: next };
         i += 2;
       }
     } else if (pattern[i] === "[" && i + 1 < pattern.length && pattern[i + 1] === "^") {
       const close = pattern.indexOf("]", i + 2);
       const chars = pattern.slice(i + 2, close);
-      tokens.push({ type: "charGroup", chars, negate: true });
+      tok = { type: "charGroup", chars, negate: true };
       i = close + 1;
     } else if (pattern[i] === "[") {
       const close = pattern.indexOf("]", i + 1);
       const chars = pattern.slice(i + 1, close);
-      tokens.push({ type: "charGroup", chars, negate: false });
+      tok = { type: "charGroup", chars, negate: false };
       i = close + 1;
     } else {
-      tokens.push({ type: "literal", char: pattern[i] });
+      tok = { type: "literal", char: pattern[i] };
       i++;
     }
+    if (pattern[i] === "+") {
+      tok.plus = true;
+      i++;
+    }
+    tokens.push(tok);
   }
   return tokens;
 }
 
-function matchAt(tokens: Token[], input: string, pos: number): boolean {
-  for (const token of tokens) {
-    if (pos >= input.length) return false;
-    const ch = input[pos];
-    if (token.type === "literal") {
-      if (ch !== token.char) return false;
-    } else if (token.type === "digit") {
-      if (!(ch >= "0" && ch <= "9")) return false;
-    } else if (token.type === "word") {
-      if (
-        !(
-          (ch >= "a" && ch <= "z") ||
-          (ch >= "A" && ch <= "Z") ||
-          (ch >= "0" && ch <= "9") ||
-          ch === "_"
-        )
-      )
-        return false;
-    } else if (token.type === "charGroup") {
-      const inGroup = token.chars.includes(ch);
-      if (token.negate ? inGroup : !inGroup) return false;
-    }
-    pos++;
+function matchesToken(token: Token, ch: string): boolean {
+  if (token.type === "literal") {
+    return ch === token.char;
+  } else if (token.type === "digit") {
+    return ch >= "0" && ch <= "9";
+  } else if (token.type === "word") {
+    return (
+      (ch >= "a" && ch <= "z") ||
+      (ch >= "A" && ch <= "Z") ||
+      (ch >= "0" && ch <= "9") ||
+      ch === "_"
+    );
+  } else {
+    const inGroup = token.chars.includes(ch);
+    return token.negate ? !inGroup : inGroup;
   }
-  return true;
+}
+
+/**
+ * Recursive matcher.
+ *
+ * @param tokens     parsed pattern tokens
+ * @param ti         current token index
+ * @param input      the input string
+ * @param pi         current position in input
+ * @param mustFinish if true, the match must consume the ENTIRE remaining input
+ */
+function matchRecur(
+  tokens: Token[],
+  ti: number,
+  input: string,
+  pi: number,
+  mustFinish: boolean
+): boolean {
+  if (ti >= tokens.length) {
+    return mustFinish ? pi === input.length : true;
+  }
+
+  const token = tokens[ti];
+
+  if (token.plus) {
+    // Consume one-or-more occurrences greedily, then backtrack shorter lengths.
+    let k = pi;
+    while (k < input.length && matchesToken(token, input[k])) k++;
+    for (let n = k; n > pi; n--) {
+      if (matchRecur(tokens, ti + 1, input, n, mustFinish)) return true;
+    }
+    return false;
+  }
+
+  if (pi >= input.length) return false;
+  if (!matchesToken(token, input[pi])) return false;
+  return matchRecur(tokens, ti + 1, input, pi + 1, mustFinish);
 }
 
 function matchPattern(inputLine: string, pattern: string): boolean {
@@ -83,18 +117,21 @@ function matchPattern(inputLine: string, pattern: string): boolean {
     pat = pat.slice(0, -1);
   }
   const tokens = parsePattern(pat);
+
   if (anchoredStart && anchoredEnd) {
-    return matchAt(tokens, inputLine, 0) && tokens.length === inputLine.length;
+    return matchRecur(tokens, 0, inputLine, 0, true);
   }
   if (anchoredStart) {
-    return matchAt(tokens, inputLine, 0);
+    return matchRecur(tokens, 0, inputLine, 0, false);
   }
   if (anchoredEnd) {
-    const startPos = inputLine.length - tokens.length;
-    return startPos >= 0 && matchAt(tokens, inputLine, startPos);
+    for (let i = 0; i <= inputLine.length; i++) {
+      if (matchRecur(tokens, 0, inputLine, i, true)) return true;
+    }
+    return false;
   }
-  for (let i = 0; i <= inputLine.length - tokens.length; i++) {
-    if (matchAt(tokens, inputLine, i)) return true;
+  for (let i = 0; i <= inputLine.length; i++) {
+    if (matchRecur(tokens, 0, inputLine, i, false)) return true;
   }
   return false;
 }
