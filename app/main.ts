@@ -251,23 +251,58 @@ function matchFlat(pattern: string): (inputLine: string) => boolean {
   };
 }
 
-if (args[2] !== "-E") {
-  console.log("Expected first argument to be '-E'");
+// Determine flags (-o) and locate the pattern.
+const oFlag = args.includes("-o");
+const eIndex = args.lastIndexOf("-E");
+if (eIndex === -1) {
+  console.log("Expected '-E' argument");
   process.exit(1);
 }
+const patternStr = args[eIndex + 1];
 
-if (args[2] !== "-E") {
-  console.log("Expected first argument to be '-E'");
-  process.exit(1);
+/** Strip leading ^ and trailing $ from a raw pattern. */
+function stripAnchors(p: string): string {
+  let q = p;
+  if (q.startsWith("^")) q = q.slice(1);
+  if (q.endsWith("$")) q = q.slice(0, -1);
+  return q;
 }
 
-const lines = inputLine.split("\n");
+/** True iff the FULL input is consumed by the (already-flattened) pattern. */
+function fullMatchFlattened(flattened: string, input: string): boolean {
+  const tokens = parsePattern(flattened);
+  return matchRecur(tokens, 0, input, 0, true);
+}
+
+/** Compute the leftmost, shortest matched substring, or null if none. */
+function extractOnce(rawPattern: string, text: string): string | null {
+  const candidates = expandGroups(stripAnchors(rawPattern));
+  for (const cand of candidates) {
+    for (let s = 0; s <= text.length; s++) {
+      for (let l = 1; s + l <= text.length; l++) {
+        const sub = text.slice(s, s + l);
+        if (fullMatchFlattened(cand, sub)) return sub;
+      }
+    }
+  }
+  return null;
+}
+
+const linesArr = inputLine.split("\n");
 
 let anyMatch = false;
-for (const line of lines) {
-  if (matchPattern(line, pattern)) {
-    console.log(line);
-    anyMatch = true;
+for (const line of linesArr) {
+  if (oFlag) {
+    const matched = extractOnce(patternStr, line);
+    if (matched !== null) {
+      console.log(matched);
+      anyMatch = true;
+    }
+  } else {
+    if (matchPattern(line, patternStr)) {
+      console.log(line);
+      anyMatch = true;
+    }
   }
 }
 
