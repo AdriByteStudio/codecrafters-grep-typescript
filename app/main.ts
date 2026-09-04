@@ -53,9 +53,10 @@ type Token =
   | { type: "word"; plus?: boolean; opt?: boolean; star?: boolean }
   | { type: "anyChar"; plus?: boolean; opt?: boolean; star?: boolean }
   | { type: "charGroup"; chars: string; negate: boolean; plus?: boolean; opt?: boolean; star?: boolean }
-  | { type: "group"; alternatives: Token[][]; plus?: boolean; opt?: boolean; star?: boolean };
+  | { type: "group"; alternatives: Token[][]; groupNum: number; plus?: boolean; opt?: boolean; star?: boolean }
+  | { type: "backref"; groupNum: number };
 
-function parsePattern(pattern: string): Token[] {
+function parsePattern(pattern: string, groupCounter: { n: number } = { n: 0 }): Token[] {
   const tokens: Token[] = [];
   let i = 0;
   while (i < pattern.length) {
@@ -67,6 +68,10 @@ function parsePattern(pattern: string): Token[] {
         i += 2;
       } else if (next === "w") {
         tok = { type: "word" };
+        i += 2;
+      } else if (next >= "1" && next <= "9") {
+        // Backreference \N.
+        tok = { type: "backref", groupNum: parseInt(next, 10) };
         i += 2;
       } else {
         tok = { type: "literal", char: next };
@@ -95,8 +100,10 @@ function parsePattern(pattern: string): Token[] {
       const inner = pattern.substring(i + 1, j);
       i = j + 1;
       const alts = splitTopLevelPipe(inner);
-      const alternatives = alts.map((alt) => parsePattern(alt));
-      tok = { type: "group", alternatives };
+      groupCounter.n++;
+      const groupNum = groupCounter.n;
+      const alternatives = alts.map((alt) => parsePattern(alt, groupCounter));
+      tok = { type: "group", alternatives, groupNum };
     } else if (pattern[i] === ".") {
       tok = { type: "anyChar" };
       i++;
@@ -194,13 +201,15 @@ function matchesToken(token: Token, ch: string): boolean {
  * @param input      the input string
  * @param pi         current position in input
  * @param mustFinish if true, the match must consume the ENTIRE remaining input
+ * @param captures   array of captured group texts (index = group number)
  */
 function matchRecur(
   tokens: Token[],
   ti: number,
   input: string,
   pi: number,
-  mustFinish: boolean
+  mustFinish: boolean,
+  captures: (string | undefined)[] = []
 ): boolean {
   if (ti >= tokens.length) {
     return mustFinish ? pi === input.length : true;
@@ -208,43 +217,62 @@ function matchRecur(
 
   const token = tokens[ti];
 
+  if (token.type === "backref") {
+    const cap = captures[token.groupNum];
+    if (cap === undefined) return false;
+    if (pi + cap.length > input.length) return false;
+    if (input.slice(pi, pi + cap.length) !== cap) return false;
+    return matchRecur(tokens, ti + 1, input, pi + cap.length, mustFinish, captures);
+  }
+
   if (token.type === "group") {
     // Find all end positions where the group matches input[startPos..end].
     // The alternative must match from startPos and consume exactly end - startPos characters.
-    const findEnds = (startPos: number): number[] => {
-      const ends: number[] = [];
+    const findEnds = (startPos: number): Array<{ end: number; text: string }> => {
+      const results: Array<{ end: number; text: string }> = [];
       for (let end = startPos + 1; end <= input.length; end++) {
         for (const alt of token.alternatives) {
           const sub = input.slice(startPos, end);
-          if (matchRecur(alt, 0, sub, 0, true)) { ends.push(end); break; }
+          if (matchRecur(alt, 0, sub, 0, true, captures)) {
+            results.push({ end, text: sub });
+            break;
+          }
         }
       }
-      return ends;
+      return results;
     };
 
     // Collect positions reachable by 0, 1, 2, ... group matches.
-    // positions[0] = [pi], positions[k] = end positions after k group matches.
-    const allPositions: number[][] = [[pi]];
+    // positions[0] = [{end: pi}], positions[k] = end positions after k group matches.
+    const allPositions: Array<Array<{ end: number; text: string }>> = [[{ end: pi, text: "" }]];
 
     for (let count = 1; count <= input.length; count++) {
       const prev = allPositions[count - 1];
-      const next: number[] = [];
+      const next: Array<{ end: number; text: string }> = [];
       for (const p of prev) {
-        for (const ep of findEnds(p)) {
-          next.push(ep);
+        for (const r of findEnds(p.end)) {
+          next.push({ end: r.end, text: r.text });
         }
       }
       if (next.length === 0) break;
-      allPositions.push([...new Set(next)]);
+      allPositions.push(next);
     }
+
+    // Try continuing to the rest of the pattern after `count` group matches.
+    const tryFrom = (count: number): boolean => {
+      const positions = allPositions[count];
+      positions.sort((a, b) => b.end - a.end); // greedy: longest first
+      for (const pos of positions) {
+        captures[token.groupNum] = pos.text;
+        if (matchRecur(tokens, ti + 1, input, pos.end, mustFinish, captures)) return true;
+      }
+      return false;
+    };
 
     if (token.plus) {
       // One or more: try from max matches downward (greedy).
       for (let count = allPositions.length - 1; count >= 1; count--) {
-        const posSorted = allPositions[count].sort((a, b) => b - a);
-        for (const p of posSorted) {
-          if (matchRecur(tokens, ti + 1, input, p, mustFinish)) return true;
-        }
+        if (tryFrom(count)) return true;
       }
       return false;
     }
@@ -252,10 +280,7 @@ function matchRecur(
     if (token.star) {
       // Zero or more: try from max matches downward (greedy).
       for (let count = allPositions.length - 1; count >= 0; count--) {
-        const posSorted = allPositions[count].sort((a, b) => b - a);
-        for (const p of posSorted) {
-          if (matchRecur(tokens, ti + 1, input, p, mustFinish)) return true;
-        }
+        if (tryFrom(count)) return true;
       }
       return false;
     }
@@ -263,19 +288,14 @@ function matchRecur(
     if (token.opt) {
       // Zero or one: try one match first, then zero.
       if (allPositions.length > 1) {
-        for (const end of allPositions[1]) {
-          if (matchRecur(tokens, ti + 1, input, end, mustFinish)) return true;
-        }
+        if (tryFrom(1)) return true;
       }
-      return matchRecur(tokens, ti + 1, input, pi, mustFinish);
+      return tryFrom(0);
     }
 
     // No quantifier: exactly one match.
     if (allPositions.length > 1) {
-      const posSorted = allPositions[1].sort((a, b) => b - a);
-      for (const end of posSorted) {
-        if (matchRecur(tokens, ti + 1, input, end, mustFinish)) return true;
-      }
+      if (tryFrom(1)) return true;
     }
     return false;
   }
@@ -285,7 +305,7 @@ function matchRecur(
     let k = pi;
     while (k < input.length && matchesToken(token, input[k])) k++;
     for (let n = k; n > pi; n--) {
-      if (matchRecur(tokens, ti + 1, input, n, mustFinish)) return true;
+      if (matchRecur(tokens, ti + 1, input, n, mustFinish, captures)) return true;
     }
     return false;
   }
@@ -295,23 +315,23 @@ function matchRecur(
     let k = pi;
     while (k < input.length && matchesToken(token, input[k])) k++;
     for (let n = k; n >= pi; n--) {
-      if (matchRecur(tokens, ti + 1, input, n, mustFinish)) return true;
+      if (matchRecur(tokens, ti + 1, input, n, mustFinish, captures)) return true;
     }
     return false;
   }
 
   if (token.opt) {
     // Zero-or-one: try skipping the token first, then try consuming it.
-    if (matchRecur(tokens, ti + 1, input, pi, mustFinish)) return true;
+    if (matchRecur(tokens, ti + 1, input, pi, mustFinish, captures)) return true;
     if (pi < input.length && matchesToken(token, input[pi])) {
-      return matchRecur(tokens, ti + 1, input, pi + 1, mustFinish);
+      return matchRecur(tokens, ti + 1, input, pi + 1, mustFinish, captures);
     }
     return false;
   }
 
   if (pi >= input.length) return false;
   if (!matchesToken(token, input[pi])) return false;
-  return matchRecur(tokens, ti + 1, input, pi + 1, mustFinish);
+  return matchRecur(tokens, ti + 1, input, pi + 1, mustFinish, captures);
 }
 
 /**
