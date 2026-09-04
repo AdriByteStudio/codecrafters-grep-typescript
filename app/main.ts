@@ -351,8 +351,15 @@ function highlightLine(rawPattern: string, text: string): string {
   return out;
 }
 
-// Color mode: --color=<val>. Only "always" activates highlighting here.
-const colorAlways = args.some((a) => a === "--color=always");
+// Decide whether to highlight based on --color=<mode>.
+// "always" -> yes; "auto" -> yes only when stdout is a TTY; "never"/absent -> no.
+const colorOpt = args.find((a) => a.startsWith("--color="));
+const colorVal = colorOpt ? colorOpt.slice("--color=".length) : undefined;
+const useColor =
+  colorVal === "always" ||
+  (colorVal === "auto" &&
+    typeof process.stdout.isTTY === "boolean" &&
+    process.stdout.isTTY === true);
 
 const linesArr = inputLine.split("\n");
 
@@ -364,7 +371,7 @@ for (const line of linesArr) {
       console.log(mtxt);
       anyMatch = true;
     }
-  } else if (colorAlways) {
+  } else if (useColor) {
     if (matchPattern(line, patternStr)) {
       console.log(highlightLine(patternStr, line));
       anyMatch = true;
