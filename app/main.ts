@@ -11,14 +11,22 @@ if (eIndex === -1) {
 }
 const patternStr = args[eIndex + 1];
 
-// Load input: from a file argument (after the pattern) if present, else stdin.
-{
-  const fileCandidate = args[eIndex + 2];
-  if (typeof fileCandidate === "string" && !fileCandidate.startsWith("-")) {
-    inputLine = await Bun.file(fileCandidate).text();
-  } else {
-    inputLine = await Bun.stdin.text();
+// Collect file arguments: everything after the pattern that doesn't start with '-'.
+const fileArgs: string[] = [];
+for (let fi = eIndex + 2; fi < args.length; fi++) {
+  if (args[fi].startsWith("-")) continue;
+  fileArgs.push(args[fi]);
+}
+
+// Load input lines: from files (with optional prefix) or stdin.
+interface InputEntry { prefix: string; text: string; }
+const inputs: InputEntry[] = [];
+if (fileArgs.length > 0) {
+  for (const f of fileArgs) {
+    inputs.push({ prefix: f + ":", text: await Bun.file(f).text() });
   }
+} else {
+  inputs.push({ prefix: "", text: await Bun.stdin.text() });
 }
 
 type Token =
@@ -383,25 +391,26 @@ const useColor =
     typeof process.stdout.isTTY === "boolean" &&
     process.stdout.isTTY === true);
 
-const linesArr = inputLine.split("\n");
-
 let anyMatch = false;
-for (const line of linesArr) {
-  if (oFlag) {
-    const matches = extractAll(patternStr, line);
-    for (const mtxt of matches) {
-      console.log(mtxt);
-      anyMatch = true;
-    }
-  } else if (useColor) {
-    if (matchPattern(line, patternStr)) {
-      console.log(highlightLine(patternStr, line));
-      anyMatch = true;
-    }
-  } else {
-    if (matchPattern(line, patternStr)) {
-      console.log(line);
-      anyMatch = true;
+for (const entry of inputs) {
+  const linesArr = entry.text.split("\n");
+  for (const line of linesArr) {
+    if (oFlag) {
+      const matches = extractAll(patternStr, line);
+      for (const mtxt of matches) {
+        console.log(entry.prefix + mtxt);
+        anyMatch = true;
+      }
+    } else if (useColor) {
+      if (matchPattern(line, patternStr)) {
+        console.log(entry.prefix + highlightLine(patternStr, line));
+        anyMatch = true;
+      }
+    } else {
+      if (matchPattern(line, patternStr)) {
+        console.log(entry.prefix + line);
+        anyMatch = true;
+      }
     }
   }
 }
