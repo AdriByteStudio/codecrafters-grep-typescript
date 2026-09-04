@@ -20,8 +20,8 @@ if (args[2] !== "-E") {
 console.error("Logs from your program will appear here!");
 
 // TODO: Uncomment the code below to pass the first stage
-// if (matchPattern(inputLine, pattern)) {
-//   process.exit(0);
-// } else {
-//   process.exit(1);
-// }
+if (matchPattern(inputLine, pattern)) {
+  process.exit(0);
+} else {
+  process.exit(1);
+}
