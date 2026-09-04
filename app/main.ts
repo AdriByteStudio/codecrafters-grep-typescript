@@ -1,14 +1,32 @@
 const args = process.argv;
-const pattern = args[3];
 
-const inputLine: string = await Bun.stdin.text();
+let inputLine: string = "";
+
+// ---- Argument parsing (early, so we know whether to read a file) --------
+const oFlag = args.includes("-o");
+const eIndex = args.lastIndexOf("-E");
+if (eIndex === -1) {
+  console.log("Expected '-E' argument");
+  process.exit(1);
+}
+const patternStr = args[eIndex + 1];
+
+// Load input: from a file argument (after the pattern) if present, else stdin.
+{
+  const fileCandidate = args[eIndex + 2];
+  if (typeof fileCandidate === "string" && !fileCandidate.startsWith("-")) {
+    inputLine = await Bun.file(fileCandidate).text();
+  } else {
+    inputLine = await Bun.stdin.text();
+  }
+}
 
 type Token =
-  | { type: "literal"; char: string; plus?: boolean; opt?: boolean }
-  | { type: "digit"; plus?: boolean; opt?: boolean }
-  | { type: "word"; plus?: boolean; opt?: boolean }
-  | { type: "anyChar"; plus?: boolean; opt?: boolean }
-  | { type: "charGroup"; chars: string; negate: boolean; plus?: boolean; opt?: boolean };
+  | { type: "literal"; char: string; plus?: boolean; opt?: boolean; star?: boolean }
+  | { type: "digit"; plus?: boolean; opt?: boolean; star?: boolean }
+  | { type: "word"; plus?: boolean; opt?: boolean; star?: boolean }
+  | { type: "anyChar"; plus?: boolean; opt?: boolean; star?: boolean }
+  | { type: "charGroup"; chars: string; negate: boolean; plus?: boolean; opt?: boolean; star?: boolean };
 
 function parsePattern(pattern: string): Token[] {
   const tokens: Token[] = [];
@@ -49,6 +67,9 @@ function parsePattern(pattern: string): Token[] {
       i++;
     } else if (pattern[i] === "?") {
       tok.opt = true;
+      i++;
+    } else if (pattern[i] === "*") {
+      tok.star = true;
       i++;
     }
     tokens.push(tok);
@@ -103,6 +124,16 @@ function matchRecur(
     let k = pi;
     while (k < input.length && matchesToken(token, input[k])) k++;
     for (let n = k; n > pi; n--) {
+      if (matchRecur(tokens, ti + 1, input, n, mustFinish)) return true;
+    }
+    return false;
+  }
+
+  if (token.star) {
+    // Zero-or-more: try consuming as many as possible greedily, then backtrack.
+    let k = pi;
+    while (k < input.length && matchesToken(token, input[k])) k++;
+    for (let n = k; n >= pi; n--) {
       if (matchRecur(tokens, ti + 1, input, n, mustFinish)) return true;
     }
     return false;
@@ -250,15 +281,6 @@ function matchFlat(pattern: string): (inputLine: string) => boolean {
     return false;
   };
 }
-
-// Determine flags (-o) and locate the pattern.
-const oFlag = args.includes("-o");
-const eIndex = args.lastIndexOf("-E");
-if (eIndex === -1) {
-  console.log("Expected '-E' argument");
-  process.exit(1);
-}
-const patternStr = args[eIndex + 1];
 
 /** Strip leading ^ and trailing $ from a raw pattern. */
 function stripAnchors(p: string): string {
