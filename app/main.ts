@@ -71,7 +71,16 @@ function matchAt(tokens: Token[], input: string, pos: number): boolean {
 }
 
 function matchPattern(inputLine: string, pattern: string): boolean {
-  const tokens = parsePattern(pattern);
+  let anchored = false;
+  let pat = pattern;
+  if (pat.startsWith("^")) {
+    anchored = true;
+    pat = pat.slice(1);
+  }
+  const tokens = parsePattern(pat);
+  if (anchored) {
+    return matchAt(tokens, inputLine, 0);
+  }
   for (let i = 0; i <= inputLine.length - tokens.length; i++) {
     if (matchAt(tokens, inputLine, i)) return true;
   }
