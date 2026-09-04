@@ -21,6 +21,12 @@ function matchPattern(inputLine: string, pattern: string): boolean {
       }
     }
     return false;
+  } else if (pattern.startsWith("[") && pattern.endsWith("]")) {
+    const chars = pattern.slice(1, -1);
+    for (const ch of inputLine) {
+      if (chars.includes(ch)) return true;
+    }
+    return false;
   } else if (pattern.length === 1) {
     return inputLine.includes(pattern);
   } else {
