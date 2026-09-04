@@ -4,10 +4,10 @@ const pattern = args[3];
 const inputLine: string = await Bun.stdin.text();
 
 type Token =
-  | { type: "literal"; char: string; plus?: boolean }
-  | { type: "digit"; plus?: boolean }
-  | { type: "word"; plus?: boolean }
-  | { type: "charGroup"; chars: string; negate: boolean; plus?: boolean };
+  | { type: "literal"; char: string; plus?: boolean; opt?: boolean }
+  | { type: "digit"; plus?: boolean; opt?: boolean }
+  | { type: "word"; plus?: boolean; opt?: boolean }
+  | { type: "charGroup"; chars: string; negate: boolean; plus?: boolean; opt?: boolean };
 
 function parsePattern(pattern: string): Token[] {
   const tokens: Token[] = [];
@@ -42,6 +42,9 @@ function parsePattern(pattern: string): Token[] {
     }
     if (pattern[i] === "+") {
       tok.plus = true;
+      i++;
+    } else if (pattern[i] === "?") {
+      tok.opt = true;
       i++;
     }
     tokens.push(tok);
@@ -95,6 +98,15 @@ function matchRecur(
     while (k < input.length && matchesToken(token, input[k])) k++;
     for (let n = k; n > pi; n--) {
       if (matchRecur(tokens, ti + 1, input, n, mustFinish)) return true;
+    }
+    return false;
+  }
+
+  if (token.opt) {
+    // Zero-or-one: try skipping the token first, then try consuming it.
+    if (matchRecur(tokens, ti + 1, input, pi, mustFinish)) return true;
+    if (pi < input.length && matchesToken(token, input[pi])) {
+      return matchRecur(tokens, ti + 1, input, pi + 1, mustFinish);
     }
     return false;
   }
