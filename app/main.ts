@@ -3,45 +3,79 @@ const pattern = args[3];
 
 const inputLine: string = await Bun.stdin.text();
 
-function matchPattern(inputLine: string, pattern: string): boolean {
-  if (pattern === "\\d") {
-    for (const ch of inputLine) {
-      if (ch >= "0" && ch <= "9") return true;
-    }
-    return false;
-  } else if (pattern === "\\w") {
-    for (const ch of inputLine) {
-      if (
-        (ch >= "a" && ch <= "z") ||
-        (ch >= "A" && ch <= "Z") ||
-        (ch >= "0" && ch <= "9") ||
-        ch === "_"
-      ) {
-        return true;
+type Token =
+  | { type: "literal"; char: string }
+  | { type: "digit" }
+  | { type: "word" }
+  | { type: "charGroup"; chars: string; negate: boolean };
+
+function parsePattern(pattern: string): Token[] {
+  const tokens: Token[] = [];
+  let i = 0;
+  while (i < pattern.length) {
+    if (pattern[i] === "\\") {
+      const next = pattern[i + 1];
+      if (next === "d") {
+        tokens.push({ type: "digit" });
+        i += 2;
+      } else if (next === "w") {
+        tokens.push({ type: "word" });
+        i += 2;
+      } else {
+        tokens.push({ type: "literal", char: next });
+        i += 2;
       }
-    }
-    return false;
-  } else if (pattern.startsWith("[") && pattern.endsWith("]")) {
-    const inner = pattern.slice(1, -1);
-    if (inner.startsWith("^")) {
-      // Negative character group
-      const chars = inner.slice(1);
-      for (const ch of inputLine) {
-        if (!chars.includes(ch)) return true;
-      }
-      return false;
+    } else if (pattern[i] === "[" && i + 1 < pattern.length && pattern[i + 1] === "^") {
+      const close = pattern.indexOf("]", i + 2);
+      const chars = pattern.slice(i + 2, close);
+      tokens.push({ type: "charGroup", chars, negate: true });
+      i = close + 1;
+    } else if (pattern[i] === "[") {
+      const close = pattern.indexOf("]", i + 1);
+      const chars = pattern.slice(i + 1, close);
+      tokens.push({ type: "charGroup", chars, negate: false });
+      i = close + 1;
     } else {
-      // Positive character group
-      for (const ch of inputLine) {
-        if (inner.includes(ch)) return true;
-      }
-      return false;
+      tokens.push({ type: "literal", char: pattern[i] });
+      i++;
     }
-  } else if (pattern.length === 1) {
-    return inputLine.includes(pattern);
-  } else {
-    throw new Error(`Unhandled pattern: ${pattern}`);
   }
+  return tokens;
+}
+
+function matchAt(tokens: Token[], input: string, pos: number): boolean {
+  for (const token of tokens) {
+    if (pos >= input.length) return false;
+    const ch = input[pos];
+    if (token.type === "literal") {
+      if (ch !== token.char) return false;
+    } else if (token.type === "digit") {
+      if (!(ch >= "0" && ch <= "9")) return false;
+    } else if (token.type === "word") {
+      if (
+        !(
+          (ch >= "a" && ch <= "z") ||
+          (ch >= "A" && ch <= "Z") ||
+          (ch >= "0" && ch <= "9") ||
+          ch === "_"
+        )
+      )
+        return false;
+    } else if (token.type === "charGroup") {
+      const inGroup = token.chars.includes(ch);
+      if (token.negate ? inGroup : !inGroup) return false;
+    }
+    pos++;
+  }
+  return true;
+}
+
+function matchPattern(inputLine: string, pattern: string): boolean {
+  const tokens = parsePattern(pattern);
+  for (let i = 0; i <= inputLine.length - tokens.length; i++) {
+    if (matchAt(tokens, inputLine, i)) return true;
+  }
+  return false;
 }
 
 if (args[2] !== "-E") {
