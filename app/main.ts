@@ -289,15 +289,17 @@ function preparePattern(rawPattern: string): RawSpec {
 }
 
 /**
- * Find the leftmost, longest match occurring AT OR AFTER `from`,
- * honoring anchors. Returns { start, text } or null.
+ * Find the leftmost match occurring AT OR AFTER `from`, honoring anchors.
+ * Among alternatives tied at the same start, the first-declared wins
+ * (real grep prefers the leftmost match overall). Within a winning
+ * alternative, the longest text is chosen. Returns { start, text } or null.
  */
 function findNextMatch(spec: RawSpec, text: string, from: number): { start: number; text: string } | null {
   const startMin = spec.anchoredStart ? Math.max(Math.min(0, text.length), from) : from;
   const startMax = spec.anchoredStart ? Math.min(0, text.length) : text.length;
 
-  for (const cand of spec.candidates) {
-    for (let s = startMin; s <= startMax; s++) {
+  for (let s = startMin; s <= startMax; s++) {
+    for (const cand of spec.candidates) {
       let best: string | null = null;
       // Length bounds: with $-anchor the match must reach the end of text.
       const lo = spec.anchoredEnd ? text.length - s : 1;
