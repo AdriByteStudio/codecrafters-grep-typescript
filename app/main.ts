@@ -21,9 +21,10 @@ for (let fi = eIndex + 2; fi < args.length; fi++) {
 // Load input lines: from files (with optional prefix) or stdin.
 interface InputEntry { prefix: string; text: string; }
 const inputs: InputEntry[] = [];
+const multiFile = fileArgs.length > 1;
 if (fileArgs.length > 0) {
   for (const f of fileArgs) {
-    inputs.push({ prefix: f + ":", text: await Bun.file(f).text() });
+    inputs.push({ prefix: multiFile ? f + ":" : "", text: await Bun.file(f).text() });
   }
 } else {
   inputs.push({ prefix: "", text: await Bun.stdin.text() });
