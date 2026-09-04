@@ -89,19 +89,36 @@ function parsePattern(pattern: string): Token[] {
       i++;
     }
     if (pattern[i] === "{") {
-      // {n} quantifier: expand into n copies of the preceding token.
+      // {n} or {n,} quantifier.
       const closeBrace = pattern.indexOf("}", i + 1);
       if (closeBrace !== -1) {
-        const count = parseInt(pattern.slice(i + 1, closeBrace), 10);
-        if (!isNaN(count) && count >= 0) {
-          for (let c = 0; c < count; c++) {
-            tokens.push({ ...tok });
+        const inner = pattern.slice(i + 1, closeBrace);
+        if (inner.includes(",")) {
+          // {n,} — at least n times.
+          const nStr = inner.split(",")[0];
+          const n = parseInt(nStr, 10);
+          if (!isNaN(n) && n >= 0) {
+            // n mandatory copies + 1 star copy (zero-or-more).
+            for (let c = 0; c < n; c++) {
+              tokens.push({ ...tok });
+            }
+            tokens.push({ ...tok, star: true });
+            i = closeBrace + 1;
+            continue; // skip the default push below
           }
-          i = closeBrace + 1;
-          continue; // skip the default push below
+        } else {
+          // {n} — exactly n times.
+          const count = parseInt(inner, 10);
+          if (!isNaN(count) && count >= 0) {
+            for (let c = 0; c < count; c++) {
+              tokens.push({ ...tok });
+            }
+            i = closeBrace + 1;
+            continue; // skip the default push below
+          }
         }
       }
-      // Not a valid {n} — treat '{' as part of the token (fall through).
+      // Not a valid {…} — fall through.
     }
     if (pattern[i] === "+") {
       tok.plus = true;
