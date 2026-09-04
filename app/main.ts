@@ -4,7 +4,12 @@ const pattern = args[3];
 const inputLine: string = await Bun.stdin.text();
 
 function matchPattern(inputLine: string, pattern: string): boolean {
-  if (pattern.length === 1) {
+  if (pattern === "\\d") {
+    for (const ch of inputLine) {
+      if (ch >= "0" && ch <= "9") return true;
+    }
+    return false;
+  } else if (pattern.length === 1) {
     return inputLine.includes(pattern);
   } else {
     throw new Error(`Unhandled pattern: ${pattern}`);
